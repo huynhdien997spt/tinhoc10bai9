@@ -163,16 +163,12 @@ const CONFIG = {
   expectedMinutes: 90,
   fastFinishMinutes: 10,
   teacherCode: "GV2026",
-  googleScriptUrl: "PASTE_GOOGLE_APPS_SCRIPT_URL_HERE"
+  googleScriptUrl: "https://script.google.com/macros/s/AKfycbz4Y2UCvIybr-TKBkoc4UPeOXoU6xK7Y4iANu6cqScWdSr74qEa3wpKk5bePXeBcVet/exec"
 };
 const DEMO_MODE = !CONFIG.googleScriptUrl || CONFIG.googleScriptUrl.indexOf("PASTE_") === 0;
 
 const DEMO_STUDENTS = [
-  {StudentID:"HS001", HoTen:"Nguyễn Văn An", Lop:"10A1"},
-  {StudentID:"HS002", HoTen:"Trần Thị Bình", Lop:"10A1"},
-  {StudentID:"HS003", HoTen:"Lê Minh Châu", Lop:"10A2"},
-  {StudentID:"HS004", HoTen:"Phạm Gia Bảo", Lop:"10A2"},
-  {StudentID:"HS005", HoTen:"Đỗ Ngọc Hà", Lop:"10A3"}
+
 ];
 
 document.getElementById('lessonNameLabel').textContent = CONFIG.lessonName.replace(/^Bài\s*\d+\.\s*/,'Bài '+CONFIG.lessonId.split('BAI')[1]+' · ');
