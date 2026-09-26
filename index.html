@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -305,10 +304,18 @@ function updateTopbar(){
 }
 function recordActivity(activityId, data){
   const prev = S.completedActivities[activityId];
-  const attempts = (prev?prev.attempts:0) + 1;
+  const attempts = Number.isFinite(data.attempts) ? data.attempts : ((prev?prev.attempts:0) + 1);
+
+  // Nếu cùng một Activity được ghi lại, thay thế điểm/XP cũ thay vì cộng lặp.
+  // Điều này giúp dữ liệu local khớp với RESPONSES (mỗi StudentKey + ActivityID chỉ có 1 dòng).
+  if(prev){
+    S.score = Math.max(0, S.score - (Number(prev.score)||0));
+    S.xp = Math.max(0, S.xp - (Number(prev.xp)||0));
+  }
+
   S.completedActivities[activityId] = Object.assign({attempts, time:new Date().toISOString()}, data);
-  S.score += (data.score||0);
-  S.xp += (data.xp||0);
+  S.score += (Number(data.score)||0);
+  S.xp += (Number(data.xp)||0);
   if(data.xp) xpToast('⭐ +'+data.xp+' XP');
   S.lastActivity = new Date().toISOString();
   saveLocal();
@@ -505,53 +512,132 @@ function renderGame1(){
     </div>
     <p class="small">Em sẽ làm gì trước tiên?</p>
     <div class="grid2" id="g1choices">
-      <button class="choice" data-c="link">🔗 Bấm liên kết</button>
-      <button class="choice" data-c="ignore">🗑 Bỏ qua</button>
-      <button class="choice" data-c="check">🔍 Kiểm tra nguồn</button>
-      <button class="choice" data-c="verify">☎ Xác minh bằng cách khác</button>
+      <button type="button" class="choice" data-c="link">🔗 Bấm liên kết</button>
+      <button type="button" class="choice" data-c="ignore">🗑 Bỏ qua</button>
+      <button type="button" class="choice" data-c="check">🔍 Kiểm tra nguồn</button>
+      <button type="button" class="choice" data-c="verify">☎ Xác minh bằng cách khác</button>
     </div>
     <div id="g1step2" class="hidden" style="margin-top:14px">
       <p class="small">Dấu hiệu nào khiến em nghi ngờ? (chọn tất cả phù hợp)</p>
       <div class="grid2" id="g1signs">
-        <button class="choice" data-s="urgent">Thúc giục / hù dọa</button>
-        <button class="choice" data-s="url">Đường dẫn lạ</button>
-        <button class="choice" data-s="info">Yêu cầu thông tin cá nhân</button>
-        <button class="choice" data-s="abnormal">Nội dung bất thường</button>
+        <button type="button" class="choice" data-s="urgent">Thúc giục / hù dọa</button>
+        <button type="button" class="choice" data-s="url">Đường dẫn lạ</button>
+        <button type="button" class="choice" data-s="info">Yêu cầu thông tin cá nhân</button>
+        <button type="button" class="choice" data-s="abnormal">Nội dung bất thường</button>
       </div>
-      <button class="btn btn-primary" id="g1submit" style="margin-top:10px">Xác nhận</button>
+      <button type="button" class="btn btn-primary" id="g1submit" style="margin-top:10px" disabled>Xác nhận</button>
+      <div id="g1inlineFeedback" class="small" style="margin-top:8px"></div>
     </div>
     <div id="g1feedback"></div>
   `;
+
+  // Trạng thái đã hoàn thành: khóa hoạt động và hiển thị kết quả cũ.
   if(done){
-    el.querySelectorAll('.choice[data-c]').forEach(b=>{ if(b.dataset.c===done.answer.choice) b.classList.add(done.answer.choice==='check'||done.answer.choice==='verify'?'correct':'incorrect'); b.disabled=true; });
-    document.getElementById('g1feedback').innerHTML = feedbackHTML(done.correct, done.correct?'Chính xác. Đây là một lựa chọn an toàn.':'Chưa chính xác. Em thử quan sát dấu hiệu này: nội dung thúc giục và đường dẫn lạ.');
+    const savedChoice = done.answer && done.answer.choice;
+    const savedSigns = new Set((done.answer && done.answer.signs) || []);
+    el.querySelectorAll('.choice[data-c]').forEach(b=>{
+      if(b.dataset.c===savedChoice) b.classList.add(done.correct?'correct':'incorrect');
+      b.disabled=true;
+    });
+    document.getElementById('g1step2').classList.remove('hidden');
+    el.querySelectorAll('#g1signs .choice').forEach(b=>{
+      if(savedSigns.has(b.dataset.s)) b.classList.add('selected');
+      b.disabled=true;
+    });
+    const submitBtn = document.getElementById('g1submit');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Đã xác nhận ✅';
+    document.getElementById('g1feedback').innerHTML = feedbackHTML(done.correct,
+      done.correct ? '✅ Chính xác. Đây là một lựa chọn an toàn.' : 'Hoạt động đã được ghi nhận.');
     return;
   }
-  let chosenChoice = null; let chosenSigns = new Set();
+
+  let chosenChoice = null;
+  let chosenSigns = new Set();
+  let attempts = 0;
+  let submitted = false;
+  const submitBtn = document.getElementById('g1submit');
+  const inlineFb = document.getElementById('g1inlineFeedback');
+
+  function refreshConfirm(){
+    // Chỉ cho xác nhận khi đã chọn cách xử lí và ít nhất một dấu hiệu.
+    submitBtn.disabled = submitted || !chosenChoice || chosenSigns.size===0;
+    if(!submitted){
+      inlineFb.textContent = !chosenChoice
+        ? 'Chọn cách xử lí trước.'
+        : (chosenSigns.size===0 ? 'Sau đó chọn ít nhất một dấu hiệu đáng ngờ.' : 'Sẵn sàng — bấm Xác nhận.');
+    }
+  }
+
   el.querySelectorAll('#g1choices .choice').forEach(b=>{
-    b.onclick = ()=>{
-      el.querySelectorAll('#g1choices .choice').forEach(x=>x.classList.remove('selected'));
+    b.addEventListener('click', ()=>{
+      if(submitted) return;
+      el.querySelectorAll('#g1choices .choice').forEach(x=>x.classList.remove('selected','correct','incorrect'));
       b.classList.add('selected');
       chosenChoice = b.dataset.c;
       document.getElementById('g1step2').classList.remove('hidden');
-    };
+      document.getElementById('g1feedback').innerHTML = '';
+      refreshConfirm();
+    });
   });
+
   el.querySelectorAll('#g1signs .choice').forEach(b=>{
-    b.onclick = ()=>{ b.classList.toggle('selected'); if(chosenSigns.has(b.dataset.s)) chosenSigns.delete(b.dataset.s); else chosenSigns.add(b.dataset.s); };
+    b.addEventListener('click', ()=>{
+      if(submitted) return;
+      b.classList.toggle('selected');
+      if(chosenSigns.has(b.dataset.s)) chosenSigns.delete(b.dataset.s);
+      else chosenSigns.add(b.dataset.s);
+      document.getElementById('g1feedback').innerHTML = '';
+      refreshConfirm();
+    });
   });
-  document.getElementById('g1submit').onclick = ()=>{
-    if(!chosenChoice){ return; }
+
+  submitBtn.addEventListener('click', ()=>{
+    if(submitted) return;
+    if(!chosenChoice || chosenSigns.size===0){
+      inlineFb.textContent = '💡 Em cần chọn cách xử lí và ít nhất một dấu hiệu trước khi xác nhận.';
+      refreshConfirm();
+      return;
+    }
+
+    attempts++;
     const safe = (chosenChoice==='check' || chosenChoice==='verify');
     const goodSigns = chosenSigns.has('urgent') && chosenSigns.has('url');
     const correct = safe && goodSigns;
-    el.querySelectorAll('#g1choices .choice').forEach(b=>{ b.disabled=true; b.classList.add(b.dataset.c===chosenChoice ? (safe?'correct':'incorrect') : ''); });
+    const feedback = document.getElementById('g1feedback');
+
+    if(!correct){
+      feedback.innerHTML = feedbackHTML(false,
+        '💡 Chưa chính xác. Em hãy kiểm tra lại cả <strong>cách xử lí</strong> và các dấu hiệu <strong>thúc giục/hù dọa</strong>, <strong>đường dẫn lạ</strong>. Em vẫn có thể sửa lựa chọn rồi thử lại.');
+      feedback.scrollIntoView({behavior:'smooth', block:'nearest'});
+      return;
+    }
+
+    submitted = true;
+    el.querySelectorAll('#g1choices .choice').forEach(b=>{
+      b.disabled=true;
+      b.classList.remove('selected');
+      if(b.dataset.c===chosenChoice) b.classList.add('correct');
+    });
     el.querySelectorAll('#g1signs .choice').forEach(b=>b.disabled=true);
-    document.getElementById('g1feedback').innerHTML = feedbackHTML(correct,
-      correct ? '✅ Chính xác. Đây là một lựa chọn an toàn — kiểm tra hoặc xác minh trước khi hành động.' :
-      '💡 Chưa chính xác. Em thử quan sát dấu hiệu này: nội dung thúc giục và đường dẫn lạ là hai dấu hiệu lừa đảo phổ biến.');
-    recordActivity('B9_RISK_MESSAGE', {answer:{choice:chosenChoice, signs:[...chosenSigns]}, correct, score: correct?10:4, xp: correct?10:4});
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Đã xác nhận ✅';
+    inlineFb.textContent = '';
+    feedback.innerHTML = feedbackHTML(true,
+      '✅ Chính xác. Kiểm tra nguồn hoặc xác minh bằng một kênh khác trước khi hành động là lựa chọn an toàn.');
+
+    recordActivity('B9_RISK_MESSAGE', {
+      answer:{choice:chosenChoice, signs:[...chosenSigns]},
+      correct:true,
+      attempts,
+      score:10,
+      xp:10
+    });
     checkP1Summary();
-  };
+    feedback.scrollIntoView({behavior:'smooth', block:'nearest'});
+  });
+
+  refreshConfirm();
 }
 /* ---- Game 2: tin nào đáng tin ---- */
 const G2_POSTS = [
